@@ -10,8 +10,6 @@ spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
 cs = digitalio.DigitalInOut(board.D22)
 mcp = MCP.MCP3008(spi, cs)
 
-light_channel = AnalogIn(mcp, MCP.P0)
-temp_channel = AnalogIn(mcp, MCP.P1)
 wave_channel = AnalogIn(mcp, MCP.P2)
 
 WINDOW = 2
@@ -55,18 +53,6 @@ def detect_waveform(samples):
     else:
         return "Unknown", peak_freq
 
-def read_sensors():
-    """Read and display sensor data."""
-    light_voltage = light_channel.voltage
-    temp_voltage = temp_channel.voltage
-    
-    lighting = (light_voltage / 3.3) * 100
-    
-    temperature = (temp_voltage / 3.3) * (280 - (-50)) + (-50)
-    
-    print(f"Lighting: {lighting:.2f} / 100")
-    print(f"Temperature: {temperature:.2f} °F")
-
 def oscilloscope():
     """Continuous oscilloscope functionality."""
     print("Starting Oscilloscope. Press Ctrl+C to exit.")
@@ -83,8 +69,6 @@ def oscilloscope():
 
 if __name__ == "__main__":
     try:
-        while True:
-            read_sensors()
-            oscilloscope()
+        oscilloscope()
     except KeyboardInterrupt:
         print("\nExiting...")

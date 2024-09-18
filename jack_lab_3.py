@@ -44,31 +44,29 @@ def detect_square(samples):
 def detect_triangle(samples):
     """Detect if the waveform is triangle."""
     derivatives = [samples[i+1] - samples[i] for i in range(len(samples)-1)]
+    second_derivatives = [derivatives[i+1] - derivatives[i] for i in range(len(derivatives)-1)]
     
-    sign_changes = sum(1 for i in range(len(derivatives)-1) if derivatives[i] * derivatives[i+1] < 0)
+    max_second_derivative = max(abs(d) for d in second_derivatives)
+    mean_abs_second_derivative = sum(abs(d) for d in second_derivatives) / len(second_derivatives)
     
-    sign_change_ratio = sign_changes / len(samples)
-    
-    return 0.01 < sign_change_ratio < 0.1
+    # Triangle waves have a more consistent second derivative than sine waves
+    return max_second_derivative / mean_abs_second_derivative < 5
 
 def calculate_period(samples):
-    """Calculate the period of the waveform using zero-crossing method."""
-    mean = sum(samples) / len(samples)
-    zero_crossings = []
-    
-    for i in range(1, len(samples)):
-        if (samples[i-1] - mean) * (samples[i] - mean) < 0:
-            zero_crossings.append(i)
-    
-    if len(zero_crossings) < 2:
+    """Calculate the period of the waveform using peak-to-peak method."""
+    peak = max(samples)
+    trough = min(samples)
+    threshold = (peak + trough) / 2
+
+    crossings = [i for i in range(1, len(samples)) if (samples[i-1] - threshold) * (samples[i] - threshold) <= 0]
+
+    if len(crossings) < 2:
         return 0  # Unable to determine period
+
+    periods = [crossings[i] - crossings[i-1] for i in range(1, len(crossings))]
+    avg_period = sum(periods) / len(periods)
     
-    periods = []
-    for i in range(1, len(zero_crossings)):
-        periods.append((zero_crossings[i] - zero_crossings[i-1]) * TI)
-    
-    period = sorted(periods)[len(periods) // 2]
-    return period * 2
+    return avg_period * TI * 2  # Multiply by 2 for full period and by TI for time
 
 def detect_waveform(samples):
     """Detect the type of waveform from the sampled data."""

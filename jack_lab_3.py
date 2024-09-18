@@ -2,162 +2,150 @@ import time
 import busio
 import digitalio
 import board
-import numpy as np  # Import NumPy for efficient numerical operations
+import numpy as np
+import scipy.fft
+import matplotlib.pyplot as plt
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
+from collections import deque
+import threading
 
 # Initialize SPI and MCP3008
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
-cs = digitalio.DigitalInOut(board.D22)
+cs = digitalio.DigitalInOut(board.D22)  # Change as per your connection
 mcp = MCP.MCP3008(spi, cs)
-
 wave_channel = AnalogIn(mcp, MCP.P2)
 
 # Sampling configuration
-WINDOW = 1  # seconds
-TI = 0.001  # seconds (1 ms sampling interval)
-S_SIZE = int(WINDOW / TI)
-VT = 0.06  # Voltage tolerance
+SAMPLE_RATE = 1000  # Hz
+WINDOW_SIZE = 1024  # Number of samples per window
+DT = 1.0 / SAMPLE_RATE  # Sampling interval
 
-def tol_check(x, y, t):
-    """Check if two voltage readings are within a specified absolute tolerance."""
-    return abs(x - y) < t
+# Buffer to store samples
+samples_buffer = deque(maxlen=WINDOW_SIZE)
 
-def moving_average(samples, window_size=5):
-    """Apply a simple moving average filter to the samples."""
-    if len(samples) < window_size:
-        return samples
-    return np.convolve(samples, np.ones(window_size)/window_size, mode='valid')
+def collect_sample():
+    """Collect a single sample from the ADC."""
+    return wave_channel.voltage
 
-def collect_samples():
-    """Collect samples from the ADC channel with precise timing."""
-    samples = []
-    start_time = time.perf_counter()
-    for i in range(S_SIZE):
-        samples.append(wave_channel.voltage)
-        # Calculate the next expected sample time
-        expected = start_time + (i + 1) * TI
-        sleep_time = expected - time.perf_counter()
-        if sleep_time > 0:
-            time.sleep(sleep_time)
-    return samples
+def update_buffer():
+    """Continuously collect samples and update the buffer."""
+    while True:
+        sample = collect_sample()
+        samples_buffer.append(sample)
+        time.sleep(DT)
 
-def detect_square(samples, tolerance=VT):
-    """Detect if the waveform is square based on duty cycle and sharp transitions."""
-    samples_np = np.array(samples)
-    peak = np.max(samples_np)
-    trough = np.min(samples_np)
-    high_threshold = peak - tolerance
-    low_threshold = trough + tolerance
-    
-    high_time = np.sum(samples_np > high_threshold)
-    low_time = np.sum(samples_np < low_threshold)
-    
-    # Square wave should spend significant time in high and low states
-    is_square = high_time > 0.4 * len(samples_np) and low_time > 0.4 * len(samples_np)
-    
-    # Additionally, check for sharp transitions by analyzing derivative spikes
-    derivatives = np.diff(samples_np)
-    derivative_threshold = 0.5  # Adjust based on expected signal
-    sharp_transitions = np.sum(np.abs(derivatives) > derivative_threshold)
-    
-    return is_square and sharp_transitions > (len(samples_np) * 0.05)  # At least 5% sharp transitions
+def compute_fft(samples, sample_rate):
+    """Compute FFT and return frequency and amplitude arrays."""
+    # Remove DC component
+    samples = samples - np.mean(samples)
+    # Apply window to reduce spectral leakage
+    window = np.hanning(len(samples))
+    samples_windowed = samples * window
+    # Compute FFT
+    fft_result = scipy.fft.fft(samples_windowed)
+    fft_freq = scipy.fft.fftfreq(len(samples), d=1/sample_rate)
+    # Take only the positive frequencies
+    idx = np.where(fft_freq >= 0)
+    fft_freq = fft_freq[idx]
+    fft_ampl = np.abs(fft_result[idx]) * 2 / np.sum(window)
+    return fft_freq, fft_ampl
 
-def detect_triangle(samples, tolerance=VT):
-    """Detect if the waveform is triangle based on slope linearity and symmetry."""
-    smoothed = moving_average(samples)
-    derivatives = np.diff(smoothed)
-    
-    # Calculate the difference between consecutive derivatives
-    second_derivatives = np.diff(derivatives)
-    
-    # Triangle waves have second derivatives close to zero except at peaks and troughs
-    std_second_derivative = np.std(second_derivatives)
-    
-    # Check for symmetry by comparing the first half to the second half
-    half = len(smoothed) // 2
-    first_half = smoothed[:half]
-    second_half = smoothed[-half:]
-    correlation = np.corrcoef(first_half, second_half[::-1])[0, 1]  # Reverse second half for symmetry
-    
-    is_triangle = std_second_derivative < (tolerance * 5) and correlation > 0.8  # Adjust thresholds as needed
-    
-    return is_triangle
+def detect_frequency(fft_freq, fft_ampl):
+    """Detect the dominant frequency in the FFT result."""
+    peak_idx = np.argmax(fft_ampl[1:]) + 1  # Exclude the DC component
+    dominant_freq = fft_freq[peak_idx]
+    return dominant_freq
 
-def detect_sine(samples, tolerance=VT):
-    """Detect if the waveform is sine based on smoothness."""
-    smoothed = moving_average(samples)
-    derivatives = np.diff(smoothed)
-    
-    # Calculate the standard deviation of derivatives
-    std_derivatives = np.std(derivatives)
-    
-    # Check for smoothness: sine waves have smooth, continuous derivatives
-    is_smooth = std_derivatives < (tolerance * 2)  # Adjust threshold as needed
-    
-    return is_smooth
+def classify_waveform(fft_freq, fft_ampl, dominant_freq):
+    """Classify waveform based on harmonic amplitude ratios."""
+    # Fundamental amplitude
+    fundamental_ampl = fft_ampl[np.argmax(fft_ampl[1:]) + 1]  # Exclude DC
 
-def calculate_period(samples):
-    """Calculate the period of the waveform using peak detection with minimum peak distance."""
-    smoothed = moving_average(samples)
-    peak = np.max(smoothed)
-    trough = np.min(smoothed)
-    threshold = (peak + trough) / 2
+    # Expected harmonics (up to 5th)
+    harmonics = [dominant_freq * n for n in range(1, 6)]
+    tolerance = dominant_freq * 0.05  # 5% tolerance
 
-    peaks = []
-    minimum_peak_distance = int(0.001 / TI)  # Example: 1 ms minimum distance
+    harmonic_ampls = []
+    for harmonic in harmonics[1:]:  # Exclude fundamental
+        idx = np.where((fft_freq >= harmonic - tolerance) & (fft_freq <= harmonic + tolerance))
+        if len(idx[0]) > 0:
+            harmonic_ampls.append(np.max(fft_ampl[idx]))
+        else:
+            harmonic_ampls.append(0)
 
-    last_peak = -minimum_peak_distance
-    for i in range(1, len(smoothed)-1):
-        if (smoothed[i] > smoothed[i-1] and
-            smoothed[i] > smoothed[i+1] and
-            smoothed[i] > threshold):
-            if i - last_peak >= minimum_peak_distance:
-                peaks.append(i)
-                last_peak = i
+    # Compute amplitude ratios
+    harmonic_ratios = [amp / fundamental_ampl for amp in harmonic_ampls]
 
-    if len(peaks) < 2:
-        return 0  # Unable to determine period
+    # Classification thresholds (empirical and may require tuning)
+    square_threshold = 0.2
+    triangle_threshold = 0.05
 
-    # Calculate periods between consecutive peaks
-    periods = [peaks[i] - peaks[i-1] for i in range(1, len(peaks))]
-    avg_period_samples = sum(periods) / len(periods)
+    # Check for Square Wave: Strong harmonics
+    if all(r > square_threshold for r in harmonic_ratios):
+        return "Square"
 
-    return avg_period_samples * TI  # Time per sample
+    # Check for Triangle Wave: Weaker harmonics
+    if all(r > triangle_threshold for r in harmonic_ratios):
+        return "Triangle"
 
-def detect_waveform(samples):
-    """Detect the type of waveform from the sampled data."""
-    if detect_square(samples):
-        waveform = "Square"
-    elif detect_triangle(samples):
-        waveform = "Triangle"
-    elif detect_sine(samples):
-        waveform = "Sine"
-    else:
-        waveform = "Unknown"
-    
-    period = calculate_period(samples)
-    frequency = 1 / period if period > 0 else 0
-    return waveform, frequency
+    # Otherwise, assume Sine Wave
+    return "Sine"
+
+def visualize(samples, fft_freq, fft_ampl, dominant_freq, waveform):
+    """Update the plots with current waveform and frequency spectrum."""
+    # Time axis
+    t = np.linspace(0, len(samples)*DT, num=len(samples))
+
+    # Update waveform plot
+    line1.set_data(t, samples)
+    ax1.set_xlim(0, t[-1])
+    ax1.set_ylim(-3.5, 3.5)  # Adjust based on your signal amplitude
+
+    # Update frequency spectrum plot
+    line2.set_data(fft_freq, fft_ampl)
+    ax2.set_xlim(0, SAMPLE_RATE / 2)
+    ax2.set_ylim(0, np.max(fft_ampl)*1.1)
+
+    # Update titles
+    ax1.set_title(f"Waveform: {waveform}, Dominant Frequency: {dominant_freq:.2f} Hz")
+    ax2.set_title("Frequency Spectrum")
+
+    plt.pause(0.001)
 
 def oscilloscope():
-    """Continuous oscilloscope functionality."""
+    """Main oscilloscope loop."""
     print("Starting Oscilloscope. Press Ctrl+C to exit.")
     previous_wave = None
     while True:
-        samples = collect_samples()
-        waveform, frequency = detect_waveform(samples)
-        
-        if waveform != previous_wave:
-            if frequency > 0:
-                print(f"Detected Waveform: {waveform}, Frequency: {frequency:.2f} Hz")
-            else:
-                print(f"Detected Waveform: {waveform}, Frequency: Unable to determine")
-            previous_wave = waveform
+        if len(samples_buffer) == WINDOW_SIZE:
+            samples = np.array(samples_buffer)
+            fft_freq, fft_ampl = compute_fft(samples, SAMPLE_RATE)
+            dominant_freq = detect_frequency(fft_freq, fft_ampl)
+            waveform = classify_waveform(fft_freq, fft_ampl, dominant_freq)
+            
+            if waveform != previous_wave:
+                if dominant_freq > 0:
+                    print(f"Detected Waveform: {waveform}, Frequency: {dominant_freq:.2f} Hz")
+                else:
+                    print(f"Detected Waveform: {waveform}, Frequency: Unable to determine")
+                previous_wave = waveform
 
+            # Clear buffer for next window
+            samples_buffer.clear()
 
-if __name__ == "__main__":
+def main():
+    """Run the oscilloscope."""
     try:
+        # Start collecting samples in the background
+        sampling_thread = threading.Thread(target=update_buffer, daemon=True)
+        sampling_thread.start()
+
+        # Start the oscilloscope
         oscilloscope()
+
     except KeyboardInterrupt:
         print("\nExiting...")
+
+if __name__ == "__main__":
+    main()

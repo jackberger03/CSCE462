@@ -43,19 +43,18 @@ def detect_square(samples):
 
 def detect_triangle(samples):
     """Detect if the waveform is triangle."""
-    slopes = []
-    for i in range(1, len(samples)):
-        d = samples[i] - samples[i-1]
-        if abs(d) < 0.04:  # works up to 50Hz
-            continue
-        match = False
-        for s in slopes:
-            if tol_check(s, d, 0.1):
-                match = True
-                break
-        if not match:
-            slopes.append(d)
-    return len(slopes) <= 2
+    # Calculate the first derivative
+    derivatives = [samples[i+1] - samples[i] for i in range(len(samples)-1)]
+    
+    # Count sign changes in the derivative
+    sign_changes = sum(1 for i in range(len(derivatives)-1) if derivatives[i] * derivatives[i+1] < 0)
+    
+    # Calculate the ratio of sign changes to total samples
+    sign_change_ratio = sign_changes / len(samples)
+    
+    # Triangle waves should have a higher sign change ratio than sine waves
+    # but lower than square waves. Adjust these thresholds as needed.
+    return 0.01 < sign_change_ratio < 0.1
 
 def calculate_period(samples):
     """Calculate the period of the waveform."""
@@ -87,17 +86,14 @@ def calculate_period(samples):
 
 def detect_waveform(samples):
     """Detect the type of waveform from the sampled data."""
-    amp = max(samples)
     if detect_square(samples):
         waveform = "Square"
-        period = calculate_period(samples)
     elif detect_triangle(samples):
         waveform = "Triangle"
-        period = calculate_period(samples)
     else:
         waveform = "Sine"
-        period = calculate_period(samples)
     
+    period = calculate_period(samples)
     frequency = 1 / period if period > 0 else 0
     return waveform, frequency
 

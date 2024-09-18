@@ -2,6 +2,7 @@ import time
 import busio
 import digitalio
 import board
+import numpy as np  # Import NumPy for efficient numerical operations
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 
@@ -24,14 +25,15 @@ def tol_check(x, y, t):
 
 def moving_average(samples, window_size=5):
     """Apply a simple moving average filter to the samples."""
-    return [sum(samples[i:i+window_size])/window_size for i in range(len(samples)-window_size+1)]
+    if len(samples) < window_size:
+        return samples
+    return np.convolve(samples, np.ones(window_size)/window_size, mode='valid')
 
 def collect_samples():
     """Collect samples from the ADC channel with precise timing."""
     samples = []
     start_time = time.perf_counter()
     for i in range(S_SIZE):
-        current_time = time.perf_counter()
         samples.append(wave_channel.voltage)
         # Calculate the next expected sample time
         expected = start_time + (i + 1) * TI
@@ -41,46 +43,86 @@ def collect_samples():
     return samples
 
 def detect_square(samples, tolerance=VT):
-    """Detect if the waveform is square based on duty cycle."""
-    peak = max(samples)
-    trough = min(samples)
+    """Detect if the waveform is square based on duty cycle and sharp transitions."""
+    samples_np = np.array(samples)
+    peak = np.max(samples_np)
+    trough = np.min(samples_np)
     high_threshold = peak - tolerance
     low_threshold = trough + tolerance
     
-    high_time = sum(1 for s in samples if s > high_threshold)
-    low_time = sum(1 for s in samples if s < low_threshold)
+    high_time = np.sum(samples_np > high_threshold)
+    low_time = np.sum(samples_np < low_threshold)
     
     # Square wave should spend significant time in high and low states
-    return high_time > 0.4 * len(samples) and low_time > 0.4 * len(samples)
+    is_square = high_time > 0.4 * len(samples_np) and low_time > 0.4 * len(samples_np)
+    
+    # Additionally, check for sharp transitions by analyzing derivative spikes
+    derivatives = np.diff(samples_np)
+    derivative_threshold = 0.5  # Adjust based on expected signal
+    sharp_transitions = np.sum(np.abs(derivatives) > derivative_threshold)
+    
+    return is_square and sharp_transitions > (len(samples_np) * 0.05)  # At least 5% sharp transitions
 
 def detect_triangle(samples, tolerance=VT):
-    """Detect if the waveform is triangle based on slope linearity."""
+    """Detect if the waveform is triangle based on slope linearity and symmetry."""
     smoothed = moving_average(samples)
-    derivatives = [smoothed[i+1] - smoothed[i] for i in range(len(smoothed)-1)]
-    mean_derivative = sum(derivatives) / len(derivatives)
-    variance = sum((d - mean_derivative) ** 2 for d in derivatives) / len(derivatives)
-    # Triangle waves have low variance in derivative changes
-    return variance < (tolerance * 10)
+    derivatives = np.diff(smoothed)
+    
+    # Calculate the difference between consecutive derivatives
+    second_derivatives = np.diff(derivatives)
+    
+    # Triangle waves have second derivatives close to zero except at peaks and troughs
+    std_second_derivative = np.std(second_derivatives)
+    
+    # Check for symmetry by comparing the first half to the second half
+    half = len(smoothed) // 2
+    first_half = smoothed[:half]
+    second_half = smoothed[-half:]
+    correlation = np.corrcoef(first_half, second_half[::-1])[0, 1]  # Reverse second half for symmetry
+    
+    is_triangle = std_second_derivative < (tolerance * 5) and correlation > 0.8  # Adjust thresholds as needed
+    
+    return is_triangle
+
+def detect_sine(samples, tolerance=VT):
+    """Detect if the waveform is sine based on smoothness."""
+    smoothed = moving_average(samples)
+    derivatives = np.diff(smoothed)
+    
+    # Calculate the standard deviation of derivatives
+    std_derivatives = np.std(derivatives)
+    
+    # Check for smoothness: sine waves have smooth, continuous derivatives
+    is_smooth = std_derivatives < (tolerance * 2)  # Adjust threshold as needed
+    
+    return is_smooth
 
 def calculate_period(samples):
-    """Calculate the period of the waveform using peak detection on a smoothed signal."""
+    """Calculate the period of the waveform using peak detection with minimum peak distance."""
     smoothed = moving_average(samples)
-    peak = max(smoothed)
-    trough = min(smoothed)
+    peak = np.max(smoothed)
+    trough = np.min(smoothed)
     threshold = (peak + trough) / 2
 
     peaks = []
+    minimum_peak_distance = int(0.001 / TI)  # Example: 1 ms minimum distance
+
+    last_peak = -minimum_peak_distance
     for i in range(1, len(smoothed)-1):
-        if smoothed[i] > smoothed[i-1] and smoothed[i] > smoothed[i+1] and smoothed[i] > threshold:
-            peaks.append(i)
-    
+        if (smoothed[i] > smoothed[i-1] and
+            smoothed[i] > smoothed[i+1] and
+            smoothed[i] > threshold):
+            if i - last_peak >= minimum_peak_distance:
+                peaks.append(i)
+                last_peak = i
+
     if len(peaks) < 2:
         return 0  # Unable to determine period
 
     # Calculate periods between consecutive peaks
     periods = [peaks[i] - peaks[i-1] for i in range(1, len(peaks))]
     avg_period_samples = sum(periods) / len(periods)
-    
+
     return avg_period_samples * TI  # Time per sample
 
 def detect_waveform(samples):
@@ -89,8 +131,10 @@ def detect_waveform(samples):
         waveform = "Square"
     elif detect_triangle(samples):
         waveform = "Triangle"
-    else:
+    elif detect_sine(samples):
         waveform = "Sine"
+    else:
+        waveform = "Unknown"
     
     period = calculate_period(samples)
     frequency = 1 / period if period > 0 else 0
@@ -110,6 +154,7 @@ def oscilloscope():
             else:
                 print(f"Detected Waveform: {waveform}, Frequency: Unable to determine")
             previous_wave = waveform
+
 
 if __name__ == "__main__":
     try:

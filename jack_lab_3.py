@@ -43,46 +43,32 @@ def detect_square(samples):
 
 def detect_triangle(samples):
     """Detect if the waveform is triangle."""
-    # Calculate the first derivative
     derivatives = [samples[i+1] - samples[i] for i in range(len(samples)-1)]
     
-    # Count sign changes in the derivative
     sign_changes = sum(1 for i in range(len(derivatives)-1) if derivatives[i] * derivatives[i+1] < 0)
     
-    # Calculate the ratio of sign changes to total samples
     sign_change_ratio = sign_changes / len(samples)
     
-    # Triangle waves should have a higher sign change ratio than sine waves
-    # but lower than square waves. Adjust these thresholds as needed.
     return 0.01 < sign_change_ratio < 0.1
 
 def calculate_period(samples):
-    """Calculate the period of the waveform."""
-    peak = max(samples)
-    periods = []
-    for _ in range(50):
-        while not tol_check(wave_channel.voltage, peak, VT):
-            time.sleep(TI)
-        start = time.monotonic()
-        time.sleep(TI)
-        while not tol_check(wave_channel.voltage, peak, VT):
-            time.sleep(TI)
-        elapsed = time.monotonic() - start
-        periods.append(elapsed)
+    """Calculate the period of the waveform using zero-crossing method."""
+    mean = sum(samples) / len(samples)
+    zero_crossings = []
     
-    periods.sort()
-    ret = periods[0]
-    cnt = 1
-    max_cnt = 1
-    for i in range(1, len(periods)):
-        if tol_check(periods[i], periods[i-1], 0.1):
-            cnt += 1
-            if cnt > max_cnt:
-                ret = periods[i]
-                max_cnt = cnt
-        else:
-            cnt = 1
-    return ret * 10/9.5  # calibration
+    for i in range(1, len(samples)):
+        if (samples[i-1] - mean) * (samples[i] - mean) < 0:
+            zero_crossings.append(i)
+    
+    if len(zero_crossings) < 2:
+        return 0  # Unable to determine period
+    
+    periods = []
+    for i in range(1, len(zero_crossings)):
+        periods.append((zero_crossings[i] - zero_crossings[i-1]) * TI)
+    
+    period = sorted(periods)[len(periods) // 2]
+    return period * 2
 
 def detect_waveform(samples):
     """Detect the type of waveform from the sampled data."""

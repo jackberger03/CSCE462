@@ -64,21 +64,32 @@ def square_period(samples):
             ref = s
     return maxCnt * ti * 2 * (10/7) # 10/7 is calibration value
 #checks data set for triangle wave
-def triangle(samples, amp, per):
-    """Detect if the waveform is a triangle wave."""
-    # Calculate the first derivative
-    derivatives = [samples[i+1] - samples[i] for i in range(len(samples)-1)]
-    
-    # Count the number of peaks (local maxima)
-    peaks = sum(1 for i in range(1, len(derivatives)-1) if derivatives[i-1] > 0 and derivatives[i] < 0)
-    
-    # Check for a consistent slope
-    slope_changes = sum(1 for i in range(1, len(derivatives)) if (derivatives[i] > 0) != (derivatives[i-1] > 0))
-    
-    # A triangle wave should have a specific number of peaks and slope changes
-    if peaks >= 2 and slope_changes <= 2:
-        return True
-    return False
+def triangle(samples, per):
+    # Calculate the first derivative (difference between consecutive samples)
+    deriv = [samples[i] - samples[i - 1] for i in range(1, len(samples))]
+
+    # Initialize counters
+    maxCnt = cnt = 1
+    delta = deriv[0]
+    sign = math.copysign(1, delta)
+
+    for i in range(1, len(deriv)):
+        d = deriv[i]
+        curr_sign = math.copysign(1, d)
+        # Check if the derivative is approximately constant and has the same sign
+        if tolCheck(d, delta, vt * 2) and curr_sign == sign:
+            cnt += 1
+            maxCnt = max(maxCnt, cnt)
+        else:
+            cnt = 1
+            delta = d
+            sign = curr_sign
+
+    # Require the derivative to be constant for at least 70% of the period
+    if maxCnt * ti < per * 0.7:
+        return False
+    return True
+
 #Analyze
 def shape(samples, per):
     # first derivative
@@ -152,9 +163,10 @@ if (square(samples)):
     print("Frequency:",str(1/per))
 else:
     per = period(max(samples),min(samples))
-    if (triangle(samples, amp, per)):
+    if (triangle(samples,per)):
         print("Triangle")
     else:
         print("Sine")
     print("Shape Function:" , shape(samples,per))
     print("Frequency:",str(1/per))
+    

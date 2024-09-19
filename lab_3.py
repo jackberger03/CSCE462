@@ -5,6 +5,7 @@ import digitalio
 import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
+import math
 
 # create the spi bus
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
@@ -40,60 +41,88 @@ def collection():
     return samples
 #checks data set for square wave
 def square(samples):
-    first = samples[0]
+    tol = max(samples) * 0.1
+    ref = max(samples)
     cnt = 1
     for s in samples[1:]:
-        if tolCheck(s,first,vt):
+        if tolCheck(s,ref,tol):
             cnt += 1
-        if cnt > len(samples) * 0.4:
+        if cnt > len(samples) * 0.47:
             return True
     return False
-#checks data set for triangle wave
-def triangle(samples, amp, per):
-    delta = samples[1] - samples[0]
-    slopes = []
-    slopes.append(delta)
-    for i in range(1,sSize-1):
-        d = samples[i]-samples[i-1]
-        if (abs(d) < 0.04): #works up to 50Hz
-            continue
-        match = False
-        for s in slopes:
-            if (tolCheck(s,d,0.1)):
-                match = True
-        if not match:
-            slopes.append(d)
-    if len(slopes) > 2:
-        print("slopes:",str(len(slopes)))
-        return False
-    return True
-#Peak of a square function
+#Period of a square function
 def square_period(samples):
-    spc = 1/ti #samples per second
-    volt = samples[0]
-    idx = 0
-    while (tolCheck(volt,samples[idx],0.1)):
-        idx += 1
-    cnt = 0
-    volt = samples[idx]
-    while (tolCheck(volt,samples[idx],0.1)):
-        cnt += 1
-        idx += 1
-    calibration = 10/7
-    return cnt / spc * 2 *calibration
+    ref = samples[0]
+    cnt = 1
+    maxCnt = 1
+    for s in samples[1:]:
+        if (tolCheck(ref,s,0.1)):
+            cnt += 1
+            maxCnt = max(maxCnt,cnt)
+        else:
+            cnt = 1
+            ref = s
+    return maxCnt * ti * 2 * (10/7) # 10/7 is calibration value
+#checks data set for triangle wave
+def triangle(samples, per):
+    delta = samples[1] - samples[0]
+    maxCnt = 1
+    cnt = 1
+    for i in range(2,len(samples)):
+        d = samples[i]-samples[i-1]
+        if tolCheck(d,delta, vt*2) or tolCheck(-d,delta, vt*2):
+            cnt += 1
+            maxCnt = max(maxCnt,cnt)
+        else:
+            cnt = 1
+            delta = d
+    if (maxCnt*ti < per * 0.4):
+        return False    
+    return True
+#Analyze
+def shape(samples, per):
+    # first derivative
+    deriv = []
+    for i in range(1,len(samples)):
+        deriv.append(samples[i]-samples[i-1])
+    # second derivative
+    deriv2 = []
+    for i in range(1,len(deriv)):
+        deriv2.append(deriv[i]-deriv[i-1])
+   # if second derivative is 0: triangle
+    cntT = 0
+    for d in deriv2:
+        if abs(d) < vt:
+            cntT += 1
+    if (cntT * ti / window > per * 0.7):
+        return "Triangle"
+   # if second derivative alternates often: sin
+    sign = math.copysign(1,deriv2[0])
+    cntS = 0
+    for d in deriv2:
+        curr_sign = math.copysign(1,d)
+        if curr_sign != sign:
+            cntS += 1
+            sign = curr_sign
+    if (cntS*ti > per*0.4):
+        return "Sine"        
+    
+    return "Unknown Shape"
+    
 #Finds time in seconds between peak values
-def period(peak):
+def period(peak,trough):
     # Get several samples of period Lengths
     periods = []
-    for i in range(50):
+    for i in range(1):
         #Wait til peak voltage hit
         while (not tolCheck(chan.voltage, peak, vt)):
             time.sleep(ti)
         start = time.monotonic()
-        time.sleep(ti)
-        elapsed = 0
+        #wait til minimum voltage hit
+        while (not tolCheck(chan.voltage, trough, vt*2)):
+            time.sleep(ti)
         #Wait for peak voltage again
-        while (not tolCheck(chan.voltage, peak, vt)):
+        while (not tolCheck(chan.voltage, peak, vt*2)):
             time.sleep(ti)
         elapsed = time.monotonic() - start
         periods.append(elapsed)
@@ -104,29 +133,29 @@ def period(peak):
     cnt = 1
     maxCnt = 1
     for i in range(1,len(ascending)):
-        if (tolCheck(ascending[i],ascending[i-1],0.1)):
+        if (tolCheck(ascending[i],ascending[i-1],0.2)):
             cnt += 1
             if (cnt > maxCnt):
                 ret = ascending[i]
                 maxCnt = cnt
         else:
-            cnt = 1 
-    per = ret * 10/9.5 #calibration
-    print("Period:",str(per))
-    return per
+            cnt = 1
+    return ret
 
 samples = collection()
-amp = max(samples)
-print("Amplitude:",str(amp))
+amp = (max(samples) + min(samples)) / 2
 
 if (square(samples)):
     print("Square")
-    print("Period:",str(square_period(samples)))
+    per = square_period(samples)
+    print("Period:",str(per))
+    print("Frequency:",str(1/per))
 else:
-    print("Not a Square")
-    per = period(amp)
-    if (triangle(samples,amp,per)):
+    per = period(max(samples),min(samples))
+    if (triangle(samples,per)):
         print("Triangle")
     else:
-        print("Not a Triangle")
+        print("Sine")
+    print("Shape Function:" , shape(samples,per))
+    print("Frequency:",str(1/per))
     

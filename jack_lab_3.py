@@ -8,17 +8,10 @@ from scipy import stats
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 
-# Create the SPI bus
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
-
-# Create the CS (chip select)
 cs = digitalio.DigitalInOut(board.D22)
-
-# Create the MCP object
 mcp = MCP.MCP3008(spi, cs)
-
-# Create an analog input channel on pin 2 (change as needed)
-chan = AnalogIn(mcp, MCP.P2)
+chan = AnalogIn(mcp, MCP.P2) # Pin 2
 
 # Sampling parameters
 sampling_rate = 2000  # Samples per second
@@ -53,7 +46,7 @@ def is_square_wave(samples):
         return True
     return False
 
-# Improved frequency calculation using FFT
+# Frequency calculation using FFT
 def calculate_frequency(samples):
     fft_result = np.fft.fft(samples)
     frequencies = np.fft.fftfreq(len(samples), d=sampling_interval)
@@ -61,7 +54,6 @@ def calculate_frequency(samples):
     positive_frequencies = frequencies[:len(frequencies)//2]
     positive_amplitudes = np.abs(fft_result)[:len(frequencies)//2]
 
-    # Skip the DC component (index 0)
     peak_index = np.argmax(positive_amplitudes[1:]) + 1
 
     return abs(positive_frequencies[peak_index])
@@ -113,7 +105,7 @@ def is_triangle_wave(samples, frequency):
                 # Found a segment where derivative is consistently positive or negative
                 # Now check if standard deviation of derivative is low
                 std_derivative = np.std(derivative)
-                if std_derivative < 0.01:  # Threshold may need adjustment
+                if std_derivative < 0.1:  # Adjust based on need
                     return True
     return False
 
@@ -149,10 +141,10 @@ try:
         print(f"Frequency: {frequency:.2f} Hz")
         print(f"Amplitude (Peak): {amplitude:.2f} V")
         print(f"Waveform Type: {waveform_type}")
-        print()  # Empty line for readability
+        print()
 
         # Pause before next measurement
-        time.sleep(0.1)  # Reduced delay for more frequent updates
+        time.sleep(0.1)
 
 except KeyboardInterrupt:
     print("Script terminated by user.")

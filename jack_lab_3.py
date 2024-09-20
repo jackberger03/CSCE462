@@ -56,7 +56,7 @@ def calculate_frequency(samples):
     # Calculate frequency
     time_period = len(samples) / sampling_rate
     frequency = (zero_crossings / 2) / time_period
-    return frequency
+    return frequency*1.333
 
 # Amplitude calculation
 def calculate_amplitude(samples):

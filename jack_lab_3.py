@@ -4,6 +4,9 @@ import busio
 import digitalio
 import board
 import numpy as np
+import matplotlib.pyplot as plt
+import threading
+import queue
 from collections import deque
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
@@ -26,7 +29,9 @@ sampling_interval = 1.0 / sampling_rate
 measurement_duration = 1.0  # Seconds
 samples_needed = int(sampling_rate * measurement_duration)
 
-# Data collection function
+# Queue to communicate between threads
+data_queue = queue.Queue()
+
 def collect_samples():
     samples = []
     for _ in range(samples_needed):
@@ -34,7 +39,6 @@ def collect_samples():
         time.sleep(sampling_interval)
     return samples
 
-# Exponential moving average filter
 def ema_filter(data, alpha=0.7):
     filtered_data = [data[0]]  # Initialize with the first data point
     for i in range(1, len(data)):
@@ -58,37 +62,27 @@ def calculate_frequency(samples):
     frequency = 1 / avg_period
     return frequency
 
-# Amplitude calculation
 def calculate_amplitude(samples):
     max_value = max(samples)
     amplitude = max_value  # Since the negative peaks are clipped to zero
     return amplitude
 
-# Square wave detection function
 def is_square_wave(samples):
-    # Since negative values are clipped, square waves will have long periods at max value followed by zeros
     tol = max(samples) * 0.1
     high_counts = sum(1 for s in samples if s > max(samples) - tol)
     low_counts = sum(1 for s in samples if s < tol)
     high_ratio = high_counts / len(samples)
     low_ratio = low_counts / len(samples)
-    # Square waves will have a significant portion of samples at high and low levels
     if high_ratio > 0.4 and low_ratio > 0.4:
         return True
     return False
 
-# Triangle wave detection function
 def is_triangle_wave(samples):
-    # Triangle waves will have a linear increase in the positive portion
-    # Calculate the first derivative
     deriv = np.diff(samples)
-    # Since negative values are clipped, we only consider positive derivatives
     positive_deriv = deriv[deriv > 0]
     if len(positive_deriv) == 0:
         return False
-    # Calculate variance of the positive derivatives
     variance = np.var(positive_deriv)
-    # Triangle waves will have lower variance in the positive derivatives compared to sine waves
     if variance < 0.01:  # Adjust threshold as needed
         return True
     return False
@@ -101,29 +95,68 @@ def classify_waveform(samples):
     else:
         return "Sine Wave"
 
-# Main script
-try:
+def data_acquisition_thread():
+    try:
+        while True:
+            # Collect raw samples
+            raw_samples = collect_samples()
+
+            # Apply filtering
+            filtered_samples = ema_filter(raw_samples, alpha=0.7)
+
+            # Put data into queue for plotting
+            data_queue.put(filtered_samples)
+
+            # Calculate frequency and amplitude
+            frequency = calculate_frequency(filtered_samples)
+            amplitude = calculate_amplitude(filtered_samples)
+
+            # Classify waveform
+            waveform_type = classify_waveform(filtered_samples)
+
+            # Output results
+            print(f"Frequency: {frequency:.2f} Hz")
+            print(f"Amplitude (Max Voltage): {amplitude:.2f} V")
+            print(f"Waveform Type: {waveform_type}\n")
+
+            # Pause before next measurement
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("Data acquisition thread terminated by user.")
+
+def plot_thread():
+    plt.ion()  # Turn on interactive mode
+    fig, ax = plt.subplots()
+    line, = ax.plot([], [])
+    ax.set_xlabel('Sample Number')
+    ax.set_ylabel('Voltage (V)')
+    ax.set_title('Waveform')
+
     while True:
-        # Collect raw samples
-        raw_samples = collect_samples()
+        try:
+            # Get data from queue
+            data = data_queue.get(timeout=1)
+            # Update plot
+            line.set_xdata(np.arange(len(data)))
+            line.set_ydata(data)
+            ax.relim()
+            ax.autoscale_view()
+            plt.draw()
+            plt.pause(0.01)
+        except queue.Empty:
+            continue
+        except KeyboardInterrupt:
+            print("Plot thread terminated by user.")
+            break
 
-        # Apply filtering
-        filtered_samples = ema_filter(raw_samples, alpha=0.7)
+# Create and start threads
+acquisition_thread = threading.Thread(target=data_acquisition_thread)
+plotting_thread = threading.Thread(target=plot_thread)
 
-        # Calculate frequency and amplitude
-        frequency = calculate_frequency(filtered_samples)
-        amplitude = calculate_amplitude(filtered_samples)
+acquisition_thread.start()
+plotting_thread.start()
 
-        # Classify waveform
-        waveform_type = classify_waveform(filtered_samples)
-
-        # Output results
-        print(f"Frequency: {frequency:.2f} Hz")
-        print(f"Amplitude (Max Voltage): {amplitude:.2f} V")
-        print(f"Waveform Type: {waveform_type}\n")
-
-        # Pause before next measurement
-        time.sleep(1)
-
-except KeyboardInterrupt:
-    print("Script terminated by user.")
+# Wait for threads to finish
+acquisition_thread.join()
+plotting_thread.join()

@@ -42,7 +42,7 @@ def collect_samples():
     return samples
 
 # Exponential moving average filter
-def ema_filter(data, alpha):
+def ema_filter(data, alpha=0.5):
     filtered_data = [data[0]]
     for i in range(1, len(data)):
         filtered_value = alpha * data[i] + (1 - alpha) * filtered_data[i - 1]
@@ -78,8 +78,19 @@ def calculate_frequency(samples):
 def calculate_amplitude(samples):
     return (max(samples) - min(samples)) / 2
 
-# New triangle wave detection
-def is_triangle_wave(samples):
+# Calculate kurtosis threshold based on frequency
+def kurtosis_threshold(frequency):
+    # Linear interpolation between known points
+    if frequency <= 1:
+        return 4.1  # Threshold at 1 Hz
+    elif frequency >= 100:
+        return 2.0  # Threshold at 100 Hz
+    else:
+        # Linear interpolation
+        return 4.1 - (frequency - 1) * (4.1 - 2.0) / (100 - 1)
+
+# Improved triangle wave detection with frequency-dependent kurtosis threshold
+def is_triangle_wave(samples, frequency):
     # Normalize the samples
     normalized = (samples - np.mean(samples)) / np.std(samples)
     
@@ -89,9 +100,12 @@ def is_triangle_wave(samples):
     # Calculate the kurtosis of the derivative
     kurtosis = np.mean((deriv - np.mean(deriv))**4) / (np.std(deriv)**4)
     
-    # Triangle waves should have a lower kurtosis than sine waves
-    # Adjust this threshold as needed
-    return kurtosis < 2.5
+    # Get the frequency-dependent threshold
+    threshold = kurtosis_threshold(frequency)
+    
+    # Triangle waves should have a lower kurtosis than the threshold
+    print(f"Kurtosis: {kurtosis}, Threshold: {threshold}")
+    return kurtosis < threshold
 
 # Main script
 try:
@@ -110,7 +124,7 @@ try:
         # Determine waveform type
         if is_square_wave(filtered_samples):
             waveform_type = "Square Wave"
-        elif is_triangle_wave(filtered_samples):
+        elif is_triangle_wave(filtered_samples, frequency):
             waveform_type = "Triangle Wave"
         else:
             waveform_type = "Sine Wave"

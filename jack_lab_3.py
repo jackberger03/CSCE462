@@ -6,7 +6,6 @@ import board
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 import numpy as np
-from scipy.stats import linregress
 
 # Create the SPI bus
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
@@ -141,19 +140,18 @@ def is_triangle_wave_enhanced(samples):
     segments.append((start_idx, len(samples) - 1))
     
     # Analyze each segment
-    linearity_scores = []
+    variance_threshold = 0.1  # Adjust as needed
+    low_variance_segments = 0
     for seg in segments:
-        x = np.arange(seg[0], seg[1])
-        y = samples[seg[0]:seg[1]]
-        if len(x) < 2:
+        y = deriv[seg[0]:seg[1]]
+        if len(y) < 2:
             continue
-        # Perform linear regression
-        slope, intercept, r_value, p_value, std_err = linregress(x, y)
-        linearity_scores.append(abs(r_value))
+        variance = np.var(y)
+        if variance < variance_threshold:
+            low_variance_segments += 1
     
-    # Check if the majority of segments have high linearity
-    high_linearity = [score for score in linearity_scores if score > 0.9]
-    if len(high_linearity) >= len(linearity_scores) * 0.8:
+    # Check if the majority of segments have low variance
+    if low_variance_segments >= len(segments) * 0.8:
         return True
     else:
         return False

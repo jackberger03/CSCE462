@@ -25,6 +25,12 @@ sampling_interval = 1.0 / sampling_rate
 measurement_duration = 1.0  # Seconds
 samples_needed = int(sampling_rate * measurement_duration)
 
+# Tolerance check function
+def tol_check(x, y, t):
+    if abs(x) < t or abs(y) < t:
+        return abs(x - y) < t
+    return abs(x - y) / abs(x) < t
+
 # Data collection function
 def collect_samples():
     samples = []
@@ -43,6 +49,18 @@ def ema_filter(data, alpha=0.5):
         filtered_data.append(filtered_value)
     return filtered_data
 
+# Square wave detection
+def is_square_wave(samples):
+    tol = max(samples) * 0.1
+    ref = max(samples)
+    cnt = 0
+    for s in samples:
+        if tol_check(s, ref, tol):
+            cnt += 1
+        if cnt > len(samples) * 0.47:
+            return True
+    return False
+
 # Improved frequency calculation using FFT
 def calculate_frequency(samples):
     fft_result = np.fft.fft(samples)
@@ -60,28 +78,13 @@ def calculate_frequency(samples):
 def calculate_amplitude(samples):
     return (max(samples) - min(samples)) / 2
 
-# Custom peak finding function
-def find_peaks(data, height):
-    peaks = []
-    for i in range(1, len(data) - 1):
-        if data[i] > data[i-1] and data[i] > data[i+1] and data[i] >= height:
-            peaks.append(i)
-    return peaks
-
-# Improved square wave detection
-def is_square_wave(samples):
-    normalized = (samples - np.mean(samples)) / np.std(samples)
-    hist, _ = np.histogram(normalized, bins=20)
-    peak_indices = find_peaks(hist, max(hist) * 0.5)
-    return len(peak_indices) >= 2 and np.ptp(normalized) > 1.5
-
-# Improved triangle wave detection
+# Triangle wave detection
 def is_triangle_wave(samples):
     normalized = (samples - np.mean(samples)) / np.std(samples)
     deriv = np.diff(normalized)
-    hist, _ = np.histogram(deriv, bins=20)
-    peak_indices = find_peaks(hist, max(hist) * 0.3)
-    return len(peak_indices) == 2 and np.abs(np.mean(deriv)) < 0.1
+    positive_slope = np.mean(deriv[deriv > 0])
+    negative_slope = np.mean(deriv[deriv < 0])
+    return abs(positive_slope + negative_slope) < 0.1 * max(abs(positive_slope), abs(negative_slope))
 
 # Main script
 try:

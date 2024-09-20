@@ -3,9 +3,10 @@ import math
 import busio
 import digitalio
 import board
-import numpy as np
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
+import numpy as np
+from scipy.stats import linregress
 
 # Create the SPI bus
 spi = busio.SPI(clock=board.SCK, MISO=board.MISO, MOSI=board.MOSI)
@@ -41,7 +42,7 @@ def collect_samples():
     return samples
 
 # Exponential moving average filter
-def ema_filter(data, alpha=0.5):
+def ema_filter(data, alpha):
     filtered_data = [data[0]]  # Initialize with the first data point
     for i in range(1, len(data)):
         filtered_value = alpha * data[i] + (1 - alpha) * filtered_data[i - 1]
@@ -82,32 +83,80 @@ def is_square_wave(samples):
         return True
     return False
 
-# Triangle wave detection function
-def is_triangle_wave(samples, period):
+def is_triangle_wave(samples):
     # Calculate the first derivative
-    deriv = [samples[i] - samples[i - 1] for i in range(1, len(samples))]
+    deriv = np.diff(samples)
 
-    # Initialize counters
-    max_cnt = cnt = 1
-    delta = deriv[0]
-    sign = math.copysign(1, delta)
+    # Normalize derivative to account for amplitude differences
+    deriv_norm = deriv / np.max(np.abs(deriv))
 
-    for i in range(1, len(deriv)):
-        d = deriv[i]
-        curr_sign = math.copysign(1, d)
-        # Check if the derivative is approximately constant and has the same sign
-        if tol_check(d, delta, vt * 2) and curr_sign == sign:
-            cnt += 1
-            max_cnt = max(max_cnt, cnt)
-        else:
-            cnt = 1
-            delta = d
-            sign = curr_sign
+    # Find where the derivative changes sign
+    sign_changes = np.where(np.diff(np.sign(deriv_norm)))[0]
 
-    # Require the derivative to be constant for at least 40% of the period
-    if max_cnt * sampling_interval < period * 0.4:
+    # Calculate the lengths of segments with constant derivative sign
+    segment_lengths = np.diff(np.concatenate(([0], sign_changes, [len(deriv_norm)])))
+
+    # Check if segments alternate between positive and negative derivatives
+    signs = np.sign(deriv_norm[sign_changes])
+
+    # Ensure we have at least 4 segments (2 positive and 2 negative)
+    if len(segment_lengths) < 4:
         return False
-    return True
+
+    # Check for alternating signs
+    alternating = np.all(signs[:-1] * signs[1:] < 0)
+
+    # Check if the segment lengths are approximately equal
+    avg_length = np.mean(segment_lengths)
+    length_tolerance = avg_length * 0.5  # Adjust as needed
+    lengths_similar = np.all(np.abs(segment_lengths - avg_length) < length_tolerance)
+
+    if alternating and lengths_similar:
+        return True
+    else:
+        return False
+
+
+def is_triangle_wave_enhanced(samples):
+    # Normalize the samples
+    samples = np.array(samples)
+    samples = (samples - np.mean(samples)) / np.std(samples)
+    
+    # Calculate the first derivative
+    deriv = np.diff(samples)
+    
+    # Identify zero crossings in the derivative to find peaks and troughs
+    zero_crossings = np.where(np.diff(np.sign(deriv)))[0] + 1
+    
+    # If we don't have enough zero crossings, we can't proceed
+    if len(zero_crossings) < 2:
+        return False
+    
+    # Segment indices for rising and falling edges
+    segments = []
+    start_idx = 0
+    for idx in zero_crossings:
+        segments.append((start_idx, idx))
+        start_idx = idx
+    segments.append((start_idx, len(samples) - 1))
+    
+    # Analyze each segment
+    linearity_scores = []
+    for seg in segments:
+        x = np.arange(seg[0], seg[1])
+        y = samples[seg[0]:seg[1]]
+        if len(x) < 2:
+            continue
+        # Perform linear regression
+        slope, intercept, r_value, p_value, std_err = linregress(x, y)
+        linearity_scores.append(abs(r_value))
+    
+    # Check if the majority of segments have high linearity
+    high_linearity = [score for score in linearity_scores if score > 0.9]
+    if len(high_linearity) >= len(linearity_scores) * 0.8:
+        return True
+    else:
+        return False
 
 # Main script
 try:
@@ -116,7 +165,7 @@ try:
         raw_samples = collect_samples()
 
         # Apply filtering (adjust alpha for less heavy filtering)
-        filtered_samples = ema_filter(raw_samples, alpha=0.7)
+        filtered_samples = ema_filter(raw_samples, alpha=0.9)
 
         # Calculate frequency and amplitude
         frequency = calculate_frequency(filtered_samples)

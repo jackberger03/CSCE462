@@ -42,7 +42,7 @@ def collect_samples():
     return samples
 
 # Exponential moving average filter
-def ema_filter(data, alpha=0.5):
+def ema_filter(data, alpha):
     filtered_data = [data[0]]
     for i in range(1, len(data)):
         filtered_value = alpha * data[i] + (1 - alpha) * filtered_data[i - 1]
@@ -117,11 +117,7 @@ try:
         # Output results
         print(f"Frequency: {frequency:.2f} Hz")
         print(f"Amplitude (Peak): {amplitude:.2f} V")
-        
-        # Only print waveform type if it has changed
-        if waveform_type != previous_waveform:
-            print(f"Waveform Type: {waveform_type}")
-            previous_waveform = waveform_type
+        print(f"Waveform Type: {waveform_type}")
         
         print()  # Empty line for readability
 

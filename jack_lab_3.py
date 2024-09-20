@@ -78,13 +78,19 @@ def calculate_frequency(samples):
 def calculate_amplitude(samples):
     return (max(samples) - min(samples)) / 2
 
-# Triangle wave detection
-def is_triangle_wave(samples):
+# Improved triangle wave detection with frequency-dependent threshold
+def is_triangle_wave(samples, frequency):
     normalized = (samples - np.mean(samples)) / np.std(samples)
     deriv = np.diff(normalized)
     positive_slope = np.mean(deriv[deriv > 0])
     negative_slope = np.mean(deriv[deriv < 0])
-    return abs(positive_slope + negative_slope) < 0.1 * max(abs(positive_slope), abs(negative_slope))
+    
+    # Calculate frequency-dependent threshold
+    base_threshold = 0.1
+    frequency_factor = 0.02  # Adjust this value to fine-tune the frequency dependence
+    threshold = base_threshold + frequency * frequency_factor
+    
+    return abs(positive_slope + negative_slope) < threshold * max(abs(positive_slope), abs(negative_slope))
 
 # Main script
 try:
@@ -103,7 +109,7 @@ try:
         # Determine waveform type
         if is_square_wave(filtered_samples):
             waveform_type = "Square Wave"
-        elif is_triangle_wave(filtered_samples):
+        elif is_triangle_wave(filtered_samples, frequency):
             waveform_type = "Triangle Wave"
         else:
             waveform_type = "Sine Wave"

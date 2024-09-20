@@ -4,7 +4,6 @@ import busio
 import digitalio
 import board
 import numpy as np
-from collections import deque
 import adafruit_mcp3xxx.mcp3008 as MCP
 from adafruit_mcp3xxx.analog_in import AnalogIn
 
@@ -21,7 +20,7 @@ mcp = MCP.MCP3008(spi, cs)
 chan = AnalogIn(mcp, MCP.P2)
 
 # Sampling parameters
-sampling_rate = 1000  # Samples per second
+sampling_rate = 2000  # Increase sampling rate for higher frequencies
 sampling_interval = 1.0 / sampling_rate
 measurement_duration = 1.0  # Seconds
 samples_needed = int(sampling_rate * measurement_duration)
@@ -45,7 +44,7 @@ def collect_samples():
 def moving_average_filter(data, window_size=5):
     return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
 
-# Frequency calculation using zero-crossing method
+# Frequency calculation using zero-crossing method with correction factor
 def calculate_frequency(samples):
     # Use the mean voltage as the threshold for zero-crossing
     threshold = sum(samples) / len(samples)
@@ -56,7 +55,8 @@ def calculate_frequency(samples):
     # Calculate frequency
     time_period = len(samples) / sampling_rate
     frequency = (zero_crossings / 2) / time_period
-    return frequency*1.333
+    # Apply correction factor to improve accuracy
+    return frequency * 1.333
 
 # Amplitude calculation
 def calculate_amplitude(samples):
@@ -66,43 +66,44 @@ def calculate_amplitude(samples):
     amplitude = peak_to_peak / 2  # Peak amplitude
     return amplitude
 
-# Waveform recognition functions
+# Square wave detection function
 def is_square_wave(samples):
     tol = max(samples) * 0.1
-    ref_high = max(samples)
-    ref_low = min(samples)
-    high_counts = 0
-    low_counts = 0
+    ref = max(samples)
+    cnt = 0
     for s in samples:
-        if tol_check(s, ref_high, tol):
-            high_counts += 1
-        elif tol_check(s, ref_low, tol):
-            low_counts += 1
-    high_ratio = high_counts / len(samples)
-    low_ratio = low_counts / len(samples)
-    # Square wave spends roughly equal time at high and low levels
-    if abs(high_ratio - 0.5) < 0.2 and abs(low_ratio - 0.5) < 0.2:
+        if tol_check(s, ref, tol):
+            cnt += 1
+    if cnt > len(samples) * 0.47:
         return True
     return False
 
-def is_triangle_wave(samples):
-    deriv = np.diff(samples)
-    # The derivative should alternate between positive and negative at a constant rate
-    sign_changes = np.diff(np.sign(deriv))
-    num_sign_changes = np.count_nonzero(sign_changes)
-    # Triangle wave has regular sign changes in the derivative
-    expected_changes = (len(samples) / (sampling_rate / calculate_frequency(samples))) * 2
-    if abs(num_sign_changes - expected_changes) < expected_changes * 0.3:
-        return True
-    return False
+# Triangle wave detection function
+def is_triangle_wave(samples, period):
+    # Calculate the first derivative
+    deriv = [samples[i] - samples[i - 1] for i in range(1, len(samples))]
 
-def classify_waveform(samples):
-    if is_square_wave(samples):
-        return "Square Wave"
-    elif is_triangle_wave(samples):
-        return "Triangle Wave"
-    else:
-        return "Sine Wave"
+    # Initialize counters
+    max_cnt = cnt = 1
+    delta = deriv[0]
+    sign = math.copysign(1, delta)
+
+    for i in range(1, len(deriv)):
+        d = deriv[i]
+        curr_sign = math.copysign(1, d)
+        # Check if the derivative is approximately constant and has the same sign
+        if tol_check(d, delta, vt * 2) and curr_sign == sign:
+            cnt += 1
+            max_cnt = max(max_cnt, cnt)
+        else:
+            cnt = 1
+            delta = d
+            sign = curr_sign
+
+    # Require the derivative to be constant for at least 40% of the period
+    if max_cnt * sampling_interval < period * 0.4:
+        return False
+    return True
 
 # Main script
 try:
@@ -113,20 +114,29 @@ try:
         # Apply noise reduction
         filtered_samples = moving_average_filter(raw_samples)
 
-        # Recalculate samples_needed after filtering
-        adjusted_samples_needed = len(filtered_samples)
-
         # Calculate frequency and amplitude
         frequency = calculate_frequency(filtered_samples)
         amplitude = calculate_amplitude(filtered_samples)
-        waveform_type = classify_waveform(filtered_samples)
+
+        # Estimate period
+        period = 1 / frequency
+
+        # Check if waveform is a square wave
+        if is_square_wave(filtered_samples):
+            waveform_type = "Square Wave"
+        else:
+            # Check if waveform is a triangle wave
+            if is_triangle_wave(filtered_samples, period):
+                waveform_type = "Triangle Wave"
+            else:
+                waveform_type = "Sine Wave"
 
         # Output results
         print(f"Frequency: {frequency:.2f} Hz")
         print(f"Amplitude (Peak): {amplitude:.2f} V")
         print(f"Waveform Type: {waveform_type}\n")
 
-        # Optional: Pause before next measurement
+        # Pause before next measurement
         time.sleep(1)
 
 except KeyboardInterrupt:

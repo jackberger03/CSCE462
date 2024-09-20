@@ -20,7 +20,7 @@ mcp = MCP.MCP3008(spi, cs)
 chan = AnalogIn(mcp, MCP.P2)
 
 # Sampling parameters
-sampling_rate = 2000  # Increase sampling rate for higher frequencies
+sampling_rate = 2000  # Samples per second
 sampling_interval = 1.0 / sampling_rate
 measurement_duration = 1.0  # Seconds
 samples_needed = int(sampling_rate * measurement_duration)
@@ -40,9 +40,13 @@ def collect_samples():
         time.sleep(sampling_interval)
     return samples
 
-# Noise reduction using moving average filter
-def moving_average_filter(data, window_size=5):
-    return np.convolve(data, np.ones(window_size)/window_size, mode='valid')
+# Exponential moving average filter
+def ema_filter(data, alpha=0.5):
+    filtered_data = [data[0]]  # Initialize with the first data point
+    for i in range(1, len(data)):
+        filtered_value = alpha * data[i] + (1 - alpha) * filtered_data[i - 1]
+        filtered_data.append(filtered_value)
+    return filtered_data
 
 # Frequency calculation using zero-crossing method with correction factor
 def calculate_frequency(samples):
@@ -56,7 +60,7 @@ def calculate_frequency(samples):
     time_period = len(samples) / sampling_rate
     frequency = (zero_crossings / 2) / time_period
     # Apply correction factor to improve accuracy
-    return frequency * 1.333
+    return frequency * 1.333*0.8
 
 # Amplitude calculation
 def calculate_amplitude(samples):
@@ -111,8 +115,8 @@ try:
         # Collect raw samples
         raw_samples = collect_samples()
 
-        # Apply noise reduction
-        filtered_samples = moving_average_filter(raw_samples)
+        # Apply filtering (adjust alpha for less heavy filtering)
+        filtered_samples = ema_filter(raw_samples, alpha=0.7)
 
         # Calculate frequency and amplitude
         frequency = calculate_frequency(filtered_samples)

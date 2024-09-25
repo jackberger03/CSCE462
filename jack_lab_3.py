@@ -24,9 +24,13 @@ def collect_samples():
     samples = []
     start_time = time.time()
     while len(samples) < samples_needed:
-        samples.append(chan.voltage)
-        while time.time() - start_time < len(samples) * sampling_interval:
-            pass
+        voltage = chan.voltage
+        if voltage != 0:
+            samples.append(voltage)
+            while time.time() - start_time < len(samples) * sampling_interval:
+                pass
+        else:
+            time.sleep(sampling_interval)
     return samples
 
 # Exponential moving average filter
@@ -85,21 +89,25 @@ try:
         # Collect raw samples
         raw_samples = collect_samples()
 
-        # Apply filtering
-        filtered_samples = ema_filter(raw_samples, alpha=0.9)
+        # Only proceed if we have collected samples
+        if raw_samples:
+            # Apply filtering
+            filtered_samples = ema_filter(raw_samples, alpha=0.7)
 
-        # Calculate frequency and amplitude
-        frequency = calculate_frequency(filtered_samples)
-        amplitude = calculate_amplitude(filtered_samples)
+            # Calculate frequency and amplitude
+            frequency = calculate_frequency(filtered_samples)
+            amplitude = calculate_amplitude(filtered_samples)
 
-        # Classify waveform using RMS method
-        waveform_type = detect_waveform(filtered_samples)
+            # Classify waveform using RMS method
+            waveform_type = detect_waveform(filtered_samples)
 
-        # Output results
-        print(f"Frequency: {frequency:.2f} Hz")
-        print(f"Amplitude (Peak): {amplitude:.2f} V")
-        print(f"Waveform Type: {waveform_type}")
-        print()
+            # Output results
+            print(f"Frequency: {frequency:.2f} Hz")
+            print(f"Amplitude (Peak): {amplitude:.2f} V")
+            print(f"Waveform Type: {waveform_type}")
+            print()
+        else:
+            print("No signal detected.")
 
         # Pause before next measurement
         time.sleep(0.1)

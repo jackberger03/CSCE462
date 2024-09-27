@@ -34,6 +34,24 @@ acc_window = []
 steps = 0
 start_time = time.time()
 
+# Calibration
+print("Calibrating sensor. Please keep the sensor still...")
+calibration_samples = 100
+calibration_sum = [0, 0, 0]
+for _ in range(calibration_samples):
+    accel = sensor.acceleration
+    calibration_sum[0] += accel[0]
+    calibration_sum[1] += accel[1]
+    calibration_sum[2] += accel[2]
+    time.sleep(0.01)
+
+calibration_offset = [
+    calibration_sum[0] / calibration_samples,
+    calibration_sum[1] / calibration_samples,
+    (calibration_sum[2] / calibration_samples) - 9.81  # Subtract gravity
+]
+print("Calibration complete.")
+
 print("Start walking. Press Ctrl+C to stop.")
 
 try:
@@ -42,26 +60,24 @@ try:
         try:
             accelerometer_data = sensor.acceleration
             gyroscope_data = sensor.gyro
-        except AttributeError:
-            print("Error: Unable to read sensor data. Make sure the sensor is connected properly.")
+        except Exception as e:
+            print(f"Error reading sensor data: {e}")
+            print("Make sure the sensor is connected properly.")
             break
 
-        # Print raw sensor data for debugging
-        print("\nRaw Sensor Data:")
-        print("Accelerometer:", accelerometer_data)
-        print("Gyroscope:", gyroscope_data)
+        # Apply calibration offset
+        calibrated_accel = (
+            accelerometer_data[0] - calibration_offset[0],
+            accelerometer_data[1] - calibration_offset[1],
+            accelerometer_data[2] - calibration_offset[2]
+        )
 
-        # Check if accelerometer_data is in the expected format
-        if isinstance(accelerometer_data, tuple) and len(accelerometer_data) == 3:
-            # Calculate acceleration magnitude
-            acc_magnitude = math.sqrt(
-                accelerometer_data[0]**2 + 
-                accelerometer_data[1]**2 + 
-                accelerometer_data[2]**2
-            )
-        else:
-            print("Error: Unexpected accelerometer data format")
-            break
+        # Calculate acceleration magnitude
+        acc_magnitude = math.sqrt(
+            calibrated_accel[0]**2 + 
+            calibrated_accel[1]**2 + 
+            calibrated_accel[2]**2
+        )
 
         # Add to window
         acc_window.append(acc_magnitude)
@@ -75,6 +91,13 @@ try:
             if new_steps > 0:
                 steps += new_steps
                 print(f"Steps: {steps}")
+        
+        # Print raw and calibrated sensor data (optional, comment out if not needed)
+        print("\nRaw Sensor Data:")
+        print("Accelerometer:", accelerometer_data)
+        print("Gyroscope:", gyroscope_data)
+        print("Calibrated Accelerometer:", calibrated_accel)
+        print("Acceleration Magnitude:", acc_magnitude)
         
         time.sleep(0.1)  # Adjust sampling rate if needed
 

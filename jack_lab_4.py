@@ -1,9 +1,12 @@
-import time
-import math
-import adafruit_mpu6050 
+import board
+import busio
+import adafruit_mpu6050
 
-# Initialize the MPU6050 sensor
-sensor = adafruit_mpu6050(0x68)
+# Create I2C bus
+i2c = busio.I2C(board.SCL, board.SDA)
+
+# Create an instance of the MPU6050 sensor
+sensor = adafruit_mpu6050.MPU6050(i2c)
 
 def low_pass_filter(data, alpha=0.1):
     filtered_data = [0] * len(data)

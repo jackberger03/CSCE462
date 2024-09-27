@@ -1,6 +1,6 @@
 import time
 import math
-from mpu6050 import mpu6050
+from adafruit_mpu6050 import mpu6050
 
 # Initialize the MPU6050 sensor
 sensor = mpu6050(0x68)

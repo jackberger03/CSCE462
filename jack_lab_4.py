@@ -1,76 +1,72 @@
-import smbus
-import math
 import time
+import math
+from mpu6050 import mpu6050
 
-# MPU6050 Registers and their Address
-PWR_MGMT_1   = 0x6B
-SMPLRT_DIV   = 0x19
-CONFIG       = 0x1A
-GYRO_CONFIG  = 0x1B
-INT_ENABLE   = 0x38
-ACCEL_XOUT_H = 0x3B
-ACCEL_YOUT_H = 0x3D
-ACCEL_ZOUT_H = 0x3F
-GYRO_XOUT_H  = 0x43
-GYRO_YOUT_H  = 0x45
-GYRO_ZOUT_H  = 0x47
+# Initialize the MPU6050 sensor
+sensor = mpu6050(0x68)
 
-def MPU_Init():
-    # Write to sample rate register
-    bus.write_byte_data(Device_Address, SMPLRT_DIV, 7)
-    
-    # Write to power management register
-    bus.write_byte_data(Device_Address, PWR_MGMT_1, 1)
-    
-    # Write to Configuration register
-    bus.write_byte_data(Device_Address, CONFIG, 0)
-    
-    # Write to Gyro configuration register
-    bus.write_byte_data(Device_Address, GYRO_CONFIG, 24)
-    
-    # Write to interrupt enable register
-    bus.write_byte_data(Device_Address, INT_ENABLE, 1)
+def low_pass_filter(data, alpha=0.1):
+    filtered_data = [0] * len(data)
+    filtered_data[0] = data[0]
+    for i in range(1, len(data)):
+        filtered_data[i] = alpha * data[i] + (1 - alpha) * filtered_data[i-1]
+    return filtered_data
 
-def read_raw_data(addr):
-    # Accelero and Gyro value are 16-bit
-    high = bus.read_byte_data(Device_Address, addr)
-    low = bus.read_byte_data(Device_Address, addr+1)
-    
-    # Concatenate higher and lower value
-    value = ((high << 8) | low)
-    
-    # Get signed value from mpu6050
-    if(value > 32768):
-        value = value - 65536
-    return value
+def detect_steps(acc_magnitude, threshold=10.5):
+    steps = 0
+    step_detected = False
+    for acc in acc_magnitude:
+        if acc > threshold and not step_detected:
+            steps += 1
+            step_detected = True
+        elif acc < threshold:
+            step_detected = False
+    return steps
 
-bus = smbus.SMBus(1)    # or bus = smbus.SMBus(0) for older version boards
-Device_Address = 0x68   # MPU6050 device address
+# Parameters
+window_size = 10
+acc_window = []
+steps = 0
+start_time = time.time()
 
-MPU_Init()
+print("Start walking. Press Ctrl+C to stop.")
 
-print ("Reading Data of Gyroscope and Accelerometer")
+try:
+    while True:
+        # Read raw sensor data
+        accelerometer_data = sensor.get_accel_data()
+        gyroscope_data = sensor.get_gyro_data()
+        
+        # Calculate acceleration magnitude
+        acc_magnitude = math.sqrt(
+            accelerometer_data['x']**2 + 
+            accelerometer_data['y']**2 + 
+            accelerometer_data['z']**2
+        )
+        
+        # Add to window
+        acc_window.append(acc_magnitude)
+        if len(acc_window) > window_size:
+            acc_window.pop(0)
+        
+        # Process data when window is full
+        if len(acc_window) == window_size:
+            filtered_acc = low_pass_filter(acc_window)
+            new_steps = detect_steps(filtered_acc)
+            if new_steps > 0:
+                steps += new_steps
+                print(f"Steps: {steps}")
+        
+        # Print raw sensor data (optional, comment out if not needed)
+        print("\nRaw Sensor Data:")
+        print("Accelerometer:", accelerometer_data)
+        print("Gyroscope:", gyroscope_data)
+        
+        time.sleep(0.1)  # Adjust sampling rate if needed
 
-while True:
-    # Read Accelerometer raw value
-    acc_x = read_raw_data(ACCEL_XOUT_H)
-    acc_y = read_raw_data(ACCEL_YOUT_H)
-    acc_z = read_raw_data(ACCEL_ZOUT_H)
-    
-    # Read Gyroscope raw value
-    gyro_x = read_raw_data(GYRO_XOUT_H)
-    gyro_y = read_raw_data(GYRO_YOUT_H)
-    gyro_z = read_raw_data(GYRO_ZOUT_H)
-    
-    # Full scale range +/- 250 degree/C as per sensitivity scale factor
-    Ax = acc_x/16384.0
-    Ay = acc_y/16384.0
-    Az = acc_z/16384.0
-    
-    Gx = gyro_x/131.0
-    Gy = gyro_y/131.0
-    Gz = gyro_z/131.0
-    
-
-    print ("Gx=%.2f" %Gx, u'\u00b0'+ "/s", "\tGy=%.2f" %Gy, u'\u00b0'+ "/s", "\tGz=%.2f" %Gz, u'\u00b0'+ "/s", "\tAx=%.2f g" %Ax, "\tAy=%.2f g" %Ay, "\tAz=%.2f g" %Az) 	
-    time.sleep(1)
+except KeyboardInterrupt:
+    end_time = time.time()
+    duration = end_time - start_time
+    print(f"\nFinal step count: {steps}")
+    print(f"Duration: {duration:.2f} seconds")
+    print(f"Average steps per minute: {steps / (duration / 60):.2f}")

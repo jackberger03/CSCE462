@@ -61,6 +61,7 @@ print("Calibration complete.")
 print("Start walking. Press Ctrl+C to stop.")
 
 try:
+    moving_avg_threshold = 0  # Initialize outside the loop
     while True:
         try:
             accelerometer_data = sensor.acceleration
@@ -91,8 +92,11 @@ try:
                     last_step_time = current_time
                     print(f"Steps: {steps}, Threshold: {moving_avg_threshold:.2f}")
         
-        # Uncomment for debugging
-        print(f"Acc Z: {acc_z:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
+        # Debug print
+        if moving_avg_threshold:
+            print(f"Acc Z: {acc_z:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
+        else:
+            print(f"Acc Z: {acc_z:.2f}, Moving Avg: Not calculated yet")
         
         time.sleep(0.1)  # 10Hz sampling rate
 

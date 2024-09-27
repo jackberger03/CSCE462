@@ -38,17 +38,31 @@ print("Start walking. Press Ctrl+C to stop.")
 
 try:
     while True:
-        # Read raw sensor data
-        accelerometer_data = sensor._raw_accel_data
-        gyroscope_data = sensor._raw_gyro_data
-        
-        # Calculate acceleration magnitude
-        acc_magnitude = math.sqrt(
-            accelerometer_data['x']**2 + 
-            accelerometer_data['y']**2 + 
-            accelerometer_data['z']**2
-        )
-        
+        # Read sensor data
+        try:
+            accelerometer_data = sensor.acceleration
+            gyroscope_data = sensor.gyro
+        except AttributeError:
+            print("Error: Unable to read sensor data. Make sure the sensor is connected properly.")
+            break
+
+        # Print raw sensor data for debugging
+        print("\nRaw Sensor Data:")
+        print("Accelerometer:", accelerometer_data)
+        print("Gyroscope:", gyroscope_data)
+
+        # Check if accelerometer_data is in the expected format
+        if isinstance(accelerometer_data, tuple) and len(accelerometer_data) == 3:
+            # Calculate acceleration magnitude
+            acc_magnitude = math.sqrt(
+                accelerometer_data[0]**2 + 
+                accelerometer_data[1]**2 + 
+                accelerometer_data[2]**2
+            )
+        else:
+            print("Error: Unexpected accelerometer data format")
+            break
+
         # Add to window
         acc_window.append(acc_magnitude)
         if len(acc_window) > window_size:
@@ -61,11 +75,6 @@ try:
             if new_steps > 0:
                 steps += new_steps
                 print(f"Steps: {steps}")
-        
-        # Print raw sensor data (optional, comment out if not needed)
-        print("\nRaw Sensor Data:")
-        print("Accelerometer:", accelerometer_data)
-        print("Gyroscope:", gyroscope_data)
         
         time.sleep(0.1)  # Adjust sampling rate if needed
 

@@ -3,6 +3,7 @@ import time
 import busio
 import adafruit_mpu6050
 import math
+from collections import deque
 
 # Create I2C bus
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -10,14 +11,10 @@ i2c = busio.I2C(board.SCL, board.SDA)
 # Create an instance of the MPU6050 sensor
 sensor = adafruit_mpu6050.MPU6050(i2c)
 
-def low_pass_filter(data, alpha=0.1):
-    filtered_data = [0] * len(data)
-    filtered_data[0] = data[0]
-    for i in range(1, len(data)):
-        filtered_data[i] = alpha * data[i] + (1 - alpha) * filtered_data[i-1]
-    return filtered_data
+def moving_average(data):
+    return sum(data) / len(data)
 
-def detect_steps(acc_magnitude, threshold=14.0, step_cooldown=0.5):
+def detect_steps(acc_magnitude, threshold, step_cooldown):
     steps = 0
     step_detected = False
     last_step_time = 0
@@ -28,7 +25,7 @@ def detect_steps(acc_magnitude, threshold=14.0, step_cooldown=0.5):
             steps += 1
             step_detected = True
             last_step_time = current_time
-        elif acc < threshold - 1.0:  # Add some hysteresis
+        elif acc < threshold * 0.9:  # Reset step detection when acceleration drops significantly below threshold
             step_detected = False
         
         current_time += 0.1  # Assuming 10Hz sampling rate
@@ -36,12 +33,13 @@ def detect_steps(acc_magnitude, threshold=14.0, step_cooldown=0.5):
     return steps
 
 # Parameters
-window_size = 20  # Increased window size
-acc_window = []
+window_size = 50  # Increased window size for better averaging
+acc_window = deque(maxlen=window_size)
+threshold_window = deque(maxlen=100)  # Window for calculating moving average threshold
 steps = 0
 start_time = time.time()
 last_step_time = 0
-step_cooldown = 0.5  # Minimum time between steps (in seconds)
+step_cooldown = 0.4  # Minimum time between steps (in seconds)
 
 print("Calibrating sensor. Please keep the sensor still...")
 calibration_samples = 100
@@ -85,25 +83,27 @@ try:
             calibrated_accel[2]**2
         )
 
-        # Add to window
+        # Add to acceleration window
         acc_window.append(acc_magnitude)
-        if len(acc_window) > window_size:
-            acc_window.pop(0)
         
-        # Process data when window is full
+        # Calculate moving average and update threshold window
         if len(acc_window) == window_size:
-            filtered_acc = low_pass_filter(acc_window)
+            avg_magnitude = moving_average(acc_window)
+            threshold_window.append(avg_magnitude)
+        
+        # Process data when both windows are full
+        if len(acc_window) == window_size and len(threshold_window) == threshold_window.maxlen:
+            moving_avg_threshold = moving_average(threshold_window) * 1.1  # 10% above moving average
             current_time = time.time()
             if (current_time - last_step_time) > step_cooldown:
-                new_steps = detect_steps(filtered_acc, threshold=11.0, step_cooldown=step_cooldown)
+                new_steps = detect_steps(acc_window, threshold=moving_avg_threshold, step_cooldown=step_cooldown)
                 if new_steps > 0:
                     steps += new_steps
                     last_step_time = current_time
-                    print(f"Steps: {steps}")
+                    print(f"Steps: {steps}, Threshold: {moving_avg_threshold:.2f}")
         
-        # Print calibrated sensor data and acceleration magnitude (optional)
-        # print("Calibrated Accelerometer:", calibrated_accel)
-        # print("Acceleration Magnitude:", acc_magnitude)
+        # Uncomment for debugging
+        # print(f"Acc Magnitude: {acc_magnitude:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
         
         time.sleep(0.1)  # 10Hz sampling rate
 

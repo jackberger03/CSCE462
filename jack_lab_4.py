@@ -17,7 +17,7 @@ def low_pass_filter(data, alpha=0.1):
         filtered_data[i] = alpha * data[i] + (1 - alpha) * filtered_data[i-1]
     return filtered_data
 
-def detect_steps(acc_magnitude, threshold=11.0, step_cooldown=0.5):
+def detect_steps(acc_magnitude, threshold=14.0, step_cooldown=0.5):
     steps = 0
     step_detected = False
     last_step_time = 0

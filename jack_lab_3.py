@@ -70,12 +70,12 @@ def detect_waveform(samples):
     form_factor = rms / mean
     
     # Classify based on crest factor and form factor
-    if 0.7 < crest_factor < 0.75 and 1.39 < form_factor < 1.42:
-        return "Square Wave"
-    elif 0.95 < crest_factor < 1.05 and 1.30 < form_factor < 1.35:
-        return "Triangle Wave"
-    elif 0.85 < crest_factor < 0.92 and 1.35 < form_factor < 1.40:
+    if 0.81 < crest_factor <  0.85 and 1.2 < form_factor < 1.28:
         return "Sine Wave"
+    elif 0.7 < crest_factor < 0.73 and 1.37 < form_factor < 1.43:
+        return "Square Wave"
+    elif 0.86 < crest_factor < 0.9 and 1.1 < form_factor < 1.36:
+        return "Triangle Wave"
     else:
         return "Unknown Waveform"
 

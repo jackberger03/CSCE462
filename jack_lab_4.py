@@ -2,6 +2,7 @@ import board
 import time
 import busio
 import adafruit_mpu6050
+import math
 
 # Create I2C bus
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -38,8 +39,8 @@ print("Start walking. Press Ctrl+C to stop.")
 try:
     while True:
         # Read raw sensor data
-        accelerometer_data = sensor.get_accel_data()
-        gyroscope_data = sensor.get_gyro_data()
+        accelerometer_data = sensor._raw_accel_data
+        gyroscope_data = sensor._raw_gyro_data
         
         # Calculate acceleration magnitude
         acc_magnitude = math.sqrt(

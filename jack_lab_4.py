@@ -1,4 +1,5 @@
 import board
+import time
 import busio
 import adafruit_mpu6050
 

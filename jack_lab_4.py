@@ -25,7 +25,7 @@ def detect_steps(acc_magnitude, threshold, step_cooldown):
             steps += 1
             step_detected = True
             last_step_time = current_time
-        elif acc < threshold * 0.9:  # Reset step detection when acceleration drops significantly below threshold
+        elif acc < threshold * 0.8:  # Lower reset threshold for increased sensitivity
             step_detected = False
         
         current_time += 0.1  # Assuming 10Hz sampling rate
@@ -33,13 +33,13 @@ def detect_steps(acc_magnitude, threshold, step_cooldown):
     return steps
 
 # Parameters
-window_size = 50  # Increased window size for better averaging
+window_size = 20  # Reduced window size for quicker response
 acc_window = deque(maxlen=window_size)
-threshold_window = deque(maxlen=100)  # Window for calculating moving average threshold
+threshold_window = deque(maxlen=50)  # Reduced window for faster adaptation
 steps = 0
 start_time = time.time()
 last_step_time = 0
-step_cooldown = 0.4  # Minimum time between steps (in seconds)
+step_cooldown = 0.3  # Reduced cooldown for increased sensitivity
 
 print("Calibrating sensor. Please keep the sensor still...")
 calibration_samples = 100
@@ -93,7 +93,7 @@ try:
         
         # Process data when both windows are full
         if len(acc_window) == window_size and len(threshold_window) == threshold_window.maxlen:
-            moving_avg_threshold = moving_average(threshold_window) * 1.1  # 10% above moving average
+            moving_avg_threshold = moving_average(threshold_window) * 1.05  # Reduced to 5% above moving average
             current_time = time.time()
             if (current_time - last_step_time) > step_cooldown:
                 new_steps = detect_steps(acc_window, threshold=moving_avg_threshold, step_cooldown=step_cooldown)
@@ -103,7 +103,7 @@ try:
                     print(f"Steps: {steps}, Threshold: {moving_avg_threshold:.2f}")
         
         # Uncomment for debugging
-        # print(f"Acc Magnitude: {acc_magnitude:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
+        print(f"Acc Magnitude: {acc_magnitude:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
         
         time.sleep(0.1)  # 10Hz sampling rate
 

@@ -19,8 +19,8 @@ def detect_step(acc_z, threshold, last_step_time, step_cooldown):
 steps = 0
 start_time = time.time()
 last_step_time = 0
-step_cooldown = 0.3  # Adjust this value to change sensitivity
-threshold = 10.5  # Manually set threshold, adjust as needed
+step_cooldown = 1  # Adjust this value to change sensitivity
+threshold = 12  # Manually set threshold, adjust as needed
 
 print("Calibrating sensor. Please keep the sensor still...")
 calibration_samples = 100

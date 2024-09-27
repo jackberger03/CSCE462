@@ -14,13 +14,13 @@ sensor = adafruit_mpu6050.MPU6050(i2c)
 def moving_average(data):
     return sum(data) / len(data)
 
-def detect_steps(acc_magnitude, threshold, step_cooldown):
+def detect_steps(acc_z, threshold, step_cooldown):
     steps = 0
     step_detected = False
     last_step_time = 0
     current_time = time.time()
     
-    for i, acc in enumerate(acc_magnitude):
+    for i, acc in enumerate(acc_z):
         if acc > threshold and not step_detected and (current_time - last_step_time) > step_cooldown:
             steps += 1
             step_detected = True
@@ -69,22 +69,11 @@ try:
             print("Make sure the sensor is connected properly.")
             break
 
-        # Apply calibration offset
-        calibrated_accel = (
-            accelerometer_data[0] - calibration_offset[0],
-            accelerometer_data[1] - calibration_offset[1],
-            accelerometer_data[2] - calibration_offset[2]
-        )
-
-        # Calculate acceleration magnitude
-        acc_magnitude = math.sqrt(
-            calibrated_accel[0]**2 + 
-            calibrated_accel[1]**2 + 
-            calibrated_accel[2]**2
-        )
+        # We're only using the z-axis data
+        acc_z = accelerometer_data[2] - calibration_offset[2]
 
         # Add to acceleration window
-        acc_window.append(acc_magnitude)
+        acc_window.append(acc_z)
         
         # Calculate moving average and update threshold window
         if len(acc_window) == window_size:
@@ -103,7 +92,7 @@ try:
                     print(f"Steps: {steps}, Threshold: {moving_avg_threshold:.2f}")
         
         # Uncomment for debugging
-        print(f"Acc Magnitude: {acc_magnitude:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
+        print(f"Acc Z: {acc_z:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
         
         time.sleep(0.1)  # 10Hz sampling rate
 

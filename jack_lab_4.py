@@ -2,8 +2,6 @@ import board
 import time
 import busio
 import adafruit_mpu6050
-import math
-from collections import deque
 
 # Create I2C bus
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -11,57 +9,33 @@ i2c = busio.I2C(board.SCL, board.SDA)
 # Create an instance of the MPU6050 sensor
 sensor = adafruit_mpu6050.MPU6050(i2c)
 
-def moving_average(data):
-    return sum(data) / len(data)
-
-def detect_steps(acc_z, threshold, step_cooldown):
-    steps = 0
-    step_detected = False
-    last_step_time = 0
+def detect_step(acc_z, threshold, last_step_time, step_cooldown):
     current_time = time.time()
-    
-    for i, acc in enumerate(acc_z):
-        if acc > threshold and not step_detected and (current_time - last_step_time) > step_cooldown:
-            steps += 1
-            step_detected = True
-            last_step_time = current_time
-        elif acc < threshold * 0.8:  # Lower reset threshold for increased sensitivity
-            step_detected = False
-        
-        current_time += 0.1  # Assuming 10Hz sampling rate
-    
-    return steps
+    if acc_z > threshold and (current_time - last_step_time) > step_cooldown:
+        return True, current_time
+    return False, last_step_time
 
 # Parameters
-window_size = 20  # Reduced window size for quicker response
-acc_window = deque(maxlen=window_size)
-threshold_window = deque(maxlen=50)  # Reduced window for faster adaptation
 steps = 0
 start_time = time.time()
 last_step_time = 0
-step_cooldown = 0.3  # Reduced cooldown for increased sensitivity
+step_cooldown = 0.3  # Adjust this value to change sensitivity
+threshold = 10.5  # Manually set threshold, adjust as needed
 
 print("Calibrating sensor. Please keep the sensor still...")
 calibration_samples = 100
-calibration_sum = [0, 0, 0]
+calibration_sum = 0
 for _ in range(calibration_samples):
     accel = sensor.acceleration
-    calibration_sum[0] += accel[0]
-    calibration_sum[1] += accel[1]
-    calibration_sum[2] += accel[2]
+    calibration_sum += accel[2]
     time.sleep(0.01)
 
-calibration_offset = [
-    calibration_sum[0] / calibration_samples,
-    calibration_sum[1] / calibration_samples,
-    (calibration_sum[2] / calibration_samples) - 9.81  # Subtract gravity
-]
+calibration_offset = (calibration_sum / calibration_samples) - 9.81  # Subtract gravity
 print("Calibration complete.")
 
 print("Start walking. Press Ctrl+C to stop.")
 
 try:
-    moving_avg_threshold = 0  # Initialize outside the loop
     while True:
         try:
             accelerometer_data = sensor.acceleration
@@ -71,32 +45,16 @@ try:
             break
 
         # We're only using the z-axis data
-        acc_z = accelerometer_data[2] - calibration_offset[2]
+        acc_z = accelerometer_data[2] - calibration_offset
 
-        # Add to acceleration window
-        acc_window.append(acc_z)
+        step_detected, last_step_time = detect_step(acc_z, threshold, last_step_time, step_cooldown)
         
-        # Calculate moving average and update threshold window
-        if len(acc_window) == window_size:
-            avg_magnitude = moving_average(acc_window)
-            threshold_window.append(avg_magnitude)
-        
-        # Process data when both windows are full
-        if len(acc_window) == window_size and len(threshold_window) == threshold_window.maxlen:
-            moving_avg_threshold = moving_average(threshold_window) * 1.05  # Reduced to 5% above moving average
-            current_time = time.time()
-            if (current_time - last_step_time) > step_cooldown:
-                new_steps = detect_steps(acc_window, threshold=moving_avg_threshold, step_cooldown=step_cooldown)
-                if new_steps > 0:
-                    steps += new_steps
-                    last_step_time = current_time
-                    print(f"Steps: {steps}, Threshold: {moving_avg_threshold:.2f}")
+        if step_detected:
+            steps += 1
+            print(f"Steps: {steps}")
         
         # Debug print
-        if moving_avg_threshold:
-            print(f"Acc Z: {acc_z:.2f}, Moving Avg: {moving_avg_threshold:.2f}")
-        else:
-            print(f"Acc Z: {acc_z:.2f}, Moving Avg: Not calculated yet")
+        print(f"Acc Z: {acc_z:.2f}, Threshold: {threshold:.2f}")
         
         time.sleep(0.1)  # 10Hz sampling rate
 
